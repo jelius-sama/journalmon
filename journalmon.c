@@ -255,12 +255,13 @@ int send_email(const char* subject, const char* html_body) {
     char cmd[MAX_CMD];
     snprintf(cmd, sizeof(cmd),
         "%s --c \"%s\" --to \"%s\" --subject \"%s\" --body \"$(cat %s)\" 2>&1",
-        "/home/kazuma/.config/mailer/config.json",
         config.mailer_path,
+        "/home/kazuma/.config/mailer/config.json",
         config.recipient,
         subject,
         temp_file
     );
+
     
     // Execute mailer
     FILE* pipe = popen(cmd, "r");
@@ -423,7 +424,7 @@ int main(int argc, char* argv[]) {
     if (strlen(config.filters) > 0) {
         printf(INFO("   Filters: %s\n"), config.filters);
     }
-    printf(INFO("\nStarting journal monitor...\n\n"));
+    printf(INFO("Starting journal monitor...\n\n"));
     
     // Setup signal handlers
     signal(SIGINT, signal_handler);
@@ -530,7 +531,7 @@ int main(int argc, char* argv[]) {
     }
     
     pclose(journal);
-    printf(OK("\nShutdown complete. Monitored %d errors.\n"), error_count);
+    printf(OK("Shutdown complete. Monitored %d errors.\n"), error_count);
     
     return 0;
 }
