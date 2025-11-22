@@ -364,19 +364,6 @@ background: linear-gradient(135deg, %s 0%%, %s 100%%);
 
 4. **Log rotation:** Systemd handles this automatically
 
-## 📦 Deployment Checklist
-
-- [ ] Compile and install binary
-- [ ] Create configuration file
-- [ ] Test email sending with mailer
-- [ ] Test journalmon manually
-- [ ] Create systemd service
-- [ ] Enable and start service
-- [ ] Verify emails are received
-- [ ] Adjust priority/filters as needed
-- [ ] Set up log rotation (automatic with systemd)
-- [ ] Document for team
-
 ## 🌟 Features
 
 ✅ Real-time monitoring of systemd journal  
@@ -394,4 +381,4 @@ background: linear-gradient(135deg, %s 0%%, %s 100%%);
 
 ## 📄 License
 
-This is a production-ready tool. Use it to keep your systems healthy! 🚀
+This is a tool for hobbyist. Use it to keep your systems healthy! 🚀
