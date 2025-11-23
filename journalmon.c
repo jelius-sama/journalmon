@@ -290,7 +290,13 @@ int send_email(const char* subject, const char* html_body) {
         return -1;
     }
 
-    write(fd, html_body, strlen(html_body));
+    int bytes = write(fd, html_body, strlen(html_body));
+    if (bytes == 0) fprintf(stderr, WARN("Wrote 0 bytes to temporary mail body; file may be incomplete"));
+    if (bytes < 0) {
+        fprintf(stderr, ERROR("Failed to write HTML body to temporary file: %s"), strerror(errno));
+        return -1;
+    }
+
     close(fd);
 
     // Build mailer command
@@ -334,6 +340,15 @@ int send_email(const char* subject, const char* html_body) {
     }
 }
 
+static inline void safe_copy(char *dst, size_t dst_size, const char *src) {
+    size_t len = strlen(src);
+    if (len >= dst_size)
+        len = dst_size - 1;
+
+    memcpy(dst, src, len);
+    dst[len] = '\0';
+}
+
 int load_config(const char* config_path) {
     FILE* f = fopen(config_path, "r");
     if (!f) return -1;
@@ -355,17 +370,17 @@ int load_config(const char* config_path) {
             while (isspace(*v)) v++;
 
             if (strcmp(k, "recipient") == 0) {
-                strncpy(config.recipient, v, sizeof(config.recipient) - 1);
+                safe_copy(config.recipient, sizeof(config.recipient), v);
             } else if (strcmp(k, "mailer_path") == 0) {
-                strncpy(config.mailer_path, v, sizeof(config.mailer_path) - 1);
+                safe_copy(config.mailer_path, sizeof(config.mailer_path), v);
             } else if (strcmp(k, "mailer_config_path") == 0) {
-                strncpy(config.mailer_config_path, v, sizeof(config.mailer_config_path) - 1);
+                safe_copy(config.mailer_config_path, sizeof(config.mailer_config_path), v);
             } else if (strcmp(k, "min_priority") == 0) {
                 config.min_priority = atoi(v);
             } else if (strcmp(k, "batch_window") == 0) {
                 config.batch_window = atoi(v);
             } else if (strcmp(k, "filters") == 0) {
-                strncpy(config.filters, v, sizeof(config.filters) - 1);
+                safe_copy(config.filters, sizeof(config.filters), v);
             }
         }
     }
