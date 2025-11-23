@@ -430,6 +430,7 @@ void show_help() {
 }
 
 int main(int argc, char* argv[]) {
+    setvbuf(stdout, NULL, _IONBF, 0);
     char* config_path = NULL;
 
     // Parse arguments
