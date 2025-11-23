@@ -8,7 +8,7 @@
 #include <errno.h>
 #include <ctype.h>
 
-#define VERSION "1.0.0"
+#define VERSION "1.1.0"
 #define MAX_LINE 8192
 #define MAX_CMD 16384
 #define CONFIG_PATH_USER ".config/journalmon/config"
@@ -20,14 +20,56 @@
 #define CYAN   "\x1b[36m"
 #define RESET  "\x1b[0m"
 
-#define WARN(text)  YELLOW "[WARN] "  text RESET
-#define ERROR(text) RED    "[ERROR] " text RESET
-#define OK(text)    GREEN  "[OK] "    text RESET
-#define INFO(text)  CYAN   "[INFO] "  text RESET
+/* Dispatcher for selecting 1-arg vs 2-arg form */
+#define _GET_OVERLOAD(_1, _2, NAME, ...) NAME
+
+/* ---- ERROR ---- */
+#define _ERROR_NOPREFIX(fmt, ...) \
+    RED "[ERROR] " fmt RESET "\n"
+
+#define _ERROR_PREFIX(prefix, fmt, ...) \
+    RED prefix "[ERROR] " fmt RESET "\n"
+
+#define ERROR(...) \
+    _GET_OVERLOAD(__VA_ARGS__, _ERROR_PREFIX, _ERROR_NOPREFIX)(__VA_ARGS__)
+
+
+/* ---- WARN ---- */
+#define _WARN_NOPREFIX(fmt, ...) \
+    YELLOW "[WARN] " fmt RESET "\n"
+
+#define _WARN_PREFIX(prefix, fmt, ...) \
+    YELLOW prefix "[WARN] " fmt RESET "\n"
+
+#define WARN(...) \
+    _GET_OVERLOAD(__VA_ARGS__, _WARN_PREFIX, _WARN_NOPREFIX)(__VA_ARGS__)
+
+
+/* ---- OK ---- */
+#define _OK_NOPREFIX(fmt, ...) \
+    GREEN "[OK] " fmt RESET "\n"
+
+#define _OK_PREFIX(prefix, fmt, ...) \
+    GREEN prefix "[OK] " fmt RESET "\n"
+
+#define OK(...) \
+    _GET_OVERLOAD(__VA_ARGS__, _OK_PREFIX, _OK_NOPREFIX)(__VA_ARGS__)
+
+
+/* ---- INFO ---- */
+#define _INFO_NOPREFIX(fmt, ...) \
+    CYAN "[INFO] " fmt RESET "\n"
+
+#define _INFO_PREFIX(prefix, fmt, ...) \
+    CYAN prefix "[INFO] " fmt RESET "\n"
+
+#define INFO(...) \
+    _GET_OVERLOAD(__VA_ARGS__, _INFO_PREFIX, _INFO_NOPREFIX)(__VA_ARGS__)
 
 typedef struct {
     char recipient[256];
     char mailer_path[512];
+    char mailer_config_path[512];
     int min_priority;  // 0-7, where 0=emerg, 3=err, 4=warning
     int batch_window;  // seconds to batch errors before sending
     char filters[1024]; // comma-separated service filters
@@ -38,17 +80,17 @@ static Config config;
 
 void signal_handler(int sig) {
     running = 0;
-    printf(ERROR("\nCaught signal %d, shutting down gracefully...\n"), sig);
+    printf(ERROR("\n", "Caught signal %d, shutting down gracefully..."), sig);
 }
 
 char* html_escape(const char* str) {
     if (!str) return strdup("");
-    
+
     size_t len = strlen(str);
     size_t new_len = len * 6 + 1; // Worst case: all chars need escaping
     char* escaped = malloc(new_len);
     if (!escaped) return strdup("");
-    
+
     size_t j = 0;
     for (size_t i = 0; i < len; i++) {
         switch (str[i]) {
@@ -112,15 +154,15 @@ char* create_html_email(const char* hostname, const char* service, const char* m
                         const char* timestamp, int priority, const char* unit) {
     char* html = malloc(MAX_CMD);
     if (!html) return NULL;
-    
+
     char* escaped_message = html_escape(message);
     char* escaped_service = html_escape(service);
     char* escaped_unit = html_escape(unit);
     char* escaped_hostname = html_escape(hostname);
-    
+
     const char* badge = get_priority_badge(priority);
     const char* color = get_priority_color(priority);
-    
+
     snprintf(html, MAX_CMD,
         "<!DOCTYPE html>\n"
         "<html>\n"
@@ -230,12 +272,12 @@ char* create_html_email(const char* hostname, const char* service, const char* m
         escaped_service,
         VERSION
     );
-    
+
     free(escaped_message);
     free(escaped_service);
     free(escaped_unit);
     free(escaped_hostname);
-    
+
     return html;
 }
 
@@ -244,46 +286,50 @@ int send_email(const char* subject, const char* html_body) {
     char temp_file[] = "/tmp/journalmon_XXXXXX";
     int fd = mkstemp(temp_file);
     if (fd == -1) {
-        fprintf(stderr, ERROR("Failed to create temp file: %s\n"), strerror(errno));
+        fprintf(stderr, ERROR("Failed to create temp file: %s"), strerror(errno));
         return -1;
     }
-    
+
     write(fd, html_body, strlen(html_body));
     close(fd);
-    
+
     // Build mailer command
     char cmd[MAX_CMD];
     snprintf(cmd, sizeof(cmd),
         "%s --c \"%s\" --to \"%s\" --subject \"%s\" --body \"$(cat %s)\" 2>&1",
         config.mailer_path,
-        "/home/kazuma/.config/mailer/config.json",
+        config.mailer_config_path,
         config.recipient,
         subject,
         temp_file
     );
 
-    
+
     // Execute mailer
     FILE* pipe = popen(cmd, "r");
     if (!pipe) {
-        fprintf(stderr, ERROR("Failed to execute mailer: %s\n"), strerror(errno));
+        fprintf(stderr, ERROR("Failed to execute mailer: %s"), strerror(errno));
         unlink(temp_file);
         return -1;
     }
-    
+
     char output[1024];
     while (fgets(output, sizeof(output), pipe) != NULL) {
-        printf("  📧 %s", output);
+        // Only print the output if it contains more than just the null terminator
+        if (strlen(output) > 1) {
+            printf("  📧 %s", output);
+        }
     }
-    
+
     int status = pclose(pipe);
     unlink(temp_file);
-    
+
     if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        printf(OK("Email sent successfully\n"));
+        // `mailer` already logs successful message
+        // printf(OK("Email sent successfully"));
         return 0;
     } else {
-        fprintf(stderr, ERROR("Mailer failed with status %d\n"), WEXITSTATUS(status));
+        fprintf(stderr, ERROR("Mailer failed with status %d"), WEXITSTATUS(status));
         return -1;
     }
 }
@@ -291,15 +337,15 @@ int send_email(const char* subject, const char* html_body) {
 int load_config(const char* config_path) {
     FILE* f = fopen(config_path, "r");
     if (!f) return -1;
-    
+
     char line[512];
     while (fgets(line, sizeof(line), f)) {
         // Skip comments and empty lines
         if (line[0] == '#' || line[0] == '\n') continue;
-        
+
         // Remove trailing newline
         line[strcspn(line, "\n")] = 0;
-        
+
         char key[128], value[384];
         if (sscanf(line, "%127[^=]=%383[^\n]", key, value) == 2) {
             // Trim whitespace
@@ -307,11 +353,13 @@ int load_config(const char* config_path) {
             char* v = value;
             while (isspace(*k)) k++;
             while (isspace(*v)) v++;
-            
+
             if (strcmp(k, "recipient") == 0) {
                 strncpy(config.recipient, v, sizeof(config.recipient) - 1);
             } else if (strcmp(k, "mailer_path") == 0) {
                 strncpy(config.mailer_path, v, sizeof(config.mailer_path) - 1);
+            } else if (strcmp(k, "mailer_config_path") == 0) {
+                strncpy(config.mailer_config_path, v, sizeof(config.mailer_config_path) - 1);
             } else if (strcmp(k, "min_priority") == 0) {
                 config.min_priority = atoi(v);
             } else if (strcmp(k, "batch_window") == 0) {
@@ -321,7 +369,7 @@ int load_config(const char* config_path) {
             }
         }
     }
-    
+
     fclose(f);
     return 0;
 }
@@ -331,7 +379,7 @@ void print_banner() {
     printf("    ╔═══════════════════════════════════════════════════════╗\n");
     printf("    ║                                                       ║\n");
     printf("    ║           JOURNALMON - System Error Monitor           ║\n");
-    printf("    ║                   Version %s                      ║\n", VERSION);
+    printf("    ║                    Version %s                      ║\n", VERSION);
     printf("    ║                                                       ║\n");
     printf("    ╚═══════════════════════════════════════════════════════╝\n");
     printf("\n");
@@ -352,6 +400,7 @@ void show_help() {
     printf("  Config file format:\n");
     printf("    recipient=admin@example.com\n");
     printf("    mailer_path=/usr/local/bin/mailer\n");
+    printf("    mailer_config_path=/home/user/.config/mailer/config.json\n");
     printf("    min_priority=3          # 0=emerg, 3=error, 4=warning, 7=debug\n");
     printf("    batch_window=60         # seconds to batch errors\n");
     printf("    filters=nginx,postgres  # optional: specific services to monitor\n\n");
@@ -367,7 +416,7 @@ void show_help() {
 
 int main(int argc, char* argv[]) {
     char* config_path = NULL;
-    
+
     // Parse arguments
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "-h") == 0 || strcmp(argv[i], "--help") == 0) {
@@ -385,12 +434,13 @@ int main(int argc, char* argv[]) {
             }
         }
     }
-    
+
     // Load configuration
-    config.min_priority = 3;  // Default: ERROR and above
+    config.min_priority = 4;  // Default: WARNING and above
     config.batch_window = 60;
     strcpy(config.mailer_path, "mailer");
-    
+    strcpy(config.mailer_config_path, "/home/user/.config/mailer/config.json");
+
     int config_loaded = 0;
     if (config_path) {
         config_loaded = (load_config(config_path) == 0);
@@ -402,50 +452,50 @@ int main(int argc, char* argv[]) {
             snprintf(user_config, sizeof(user_config), "%s/%s", home, CONFIG_PATH_USER);
             config_loaded = (load_config(user_config) == 0);
         }
-        
+
         // Try system config
         if (!config_loaded) {
             config_loaded = (load_config(CONFIG_PATH_SYSTEM) == 0);
         }
     }
-    
+
     if (!config_loaded || strlen(config.recipient) == 0) {
-        fprintf(stderr, ERROR("Error: No valid configuration found.\n"));
-        fprintf(stderr, ERROR("Please create a config file at ~/.config/journalmon/config\n"));
-        fprintf(stderr, ERROR("Run 'journalmon --help' for more information.\n"));
+        fprintf(stderr, ERROR("Error: No valid configuration found."));
+        fprintf(stderr, ERROR("Please create a config file at ~/.config/journalmon/config"));
+        fprintf(stderr, ERROR("Run 'journalmon --help' for more information."));
         return 1;
     }
-    
+
     print_banner();
-    printf(OK("Configuration loaded\n"));
-    printf(INFO("   Recipient: %s\n"), config.recipient);
-    printf(INFO("   Mailer: %s\n"), config.mailer_path);
-    printf(INFO("   Min Priority: %s (≤%d)\n"), get_priority_badge(config.min_priority), config.min_priority);
+    printf(OK("Configuration loaded"));
+    printf(INFO("   Recipient: %s"), config.recipient);
+    printf(INFO("   Mailer: %s"), config.mailer_path);
+    printf(INFO("   Min Priority: %s (≤%d)"), get_priority_badge(config.min_priority), config.min_priority);
     if (strlen(config.filters) > 0) {
-        printf(INFO("   Filters: %s\n"), config.filters);
+        printf(INFO("   Filters: %s"), config.filters);
     }
-    printf(INFO("Starting journal monitor...\n\n"));
-    
+    printf(INFO("Starting journal monitor...\n"));
+
     // Setup signal handlers
     signal(SIGINT, signal_handler);
     signal(SIGTERM, signal_handler);
-    
+
     // Build journalctl command
     char journal_cmd[1024];
     snprintf(journal_cmd, sizeof(journal_cmd),
         "journalctl -f -p %d -o json --no-pager",
         config.min_priority
     );
-    
+
     FILE* journal = popen(journal_cmd, "r");
     if (!journal) {
-        fprintf(stderr, ERROR("Failed to start journalctl: %s\n"), strerror(errno));
+        fprintf(stderr, ERROR("Failed to start journalctl: %s"), strerror(errno));
         return 1;
     }
-    
+
     char line[MAX_LINE];
     int error_count = 0;
-    
+
     while (running && fgets(line, sizeof(line), journal) != NULL) {
         // Parse JSON (simple parsing for key fields)
         char message[MAX_LINE] = {0};
@@ -453,7 +503,7 @@ int main(int argc, char* argv[]) {
         char unit[256] = {0};
         char timestamp[128] = {0};
         int priority = 3;
-        
+
         // Extract fields (basic JSON parsing)
         char* p;
         if ((p = strstr(line, "\"MESSAGE\":\""))) {
@@ -473,10 +523,10 @@ int main(int argc, char* argv[]) {
         if ((p = strstr(line, "\"__REALTIME_TIMESTAMP\":\""))) {
             sscanf(p, "\"__REALTIME_TIMESTAMP\":\"%[^\"]\"", timestamp);
         }
-        
+
         // Skip if no message
         if (strlen(message) == 0) continue;
-        
+
         // Apply filters
         if (strlen(config.filters) > 0) {
             int matches = 0;
@@ -490,26 +540,26 @@ int main(int argc, char* argv[]) {
             }
             if (!matches) continue;
         }
-        
+
         error_count++;
-        
+
         // Get hostname
         char hostname[256];
         gethostname(hostname, sizeof(hostname));
-        
+
         // Format timestamp
         time_t now = time(NULL);
         struct tm* tm_info = localtime(&now);
         char time_str[64];
         strftime(time_str, sizeof(time_str), "%Y-%m-%d %H:%M:%S %Z", tm_info);
-        
-        printf(INFO("[%d] Priority %d: %s - %s\n"), error_count, priority, syslog_id, message);
-        
+
+        printf(INFO("[%d] Priority %d: %s - %s"), error_count, priority, syslog_id, message);
+
         // Create email
         char subject[512];
         snprintf(subject, sizeof(subject), "[%s] System Alert: %s on %s",
             get_priority_badge(priority), syslog_id, hostname);
-        
+
         char* html = create_html_email(
             hostname,
             strlen(syslog_id) ? syslog_id : "unknown",
@@ -518,20 +568,20 @@ int main(int argc, char* argv[]) {
             priority,
             strlen(unit) ? unit : "N/A"
         );
-        
+
         if (html) {
             send_email(subject, html);
             free(html);
         }
-        
+
         // Small delay to avoid spam
         if (config.batch_window > 0) {
             sleep(1);
         }
     }
-    
+
     pclose(journal);
-    printf(OK("Shutdown complete. Monitored %d errors.\n"), error_count);
-    
+    printf(OK("Shutdown complete. Monitored %d errors."), error_count);
+
     return 0;
 }
