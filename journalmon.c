@@ -7,6 +7,7 @@
 #include <sys/wait.h>
 #include <errno.h>
 #include <ctype.h>
+#include "libmailer/libmailer.h"
 
 #define VERSION "1.1.0"
 #define MAX_LINE 8192
@@ -68,8 +69,7 @@
 
 typedef struct {
     char recipient[256];
-    char mailer_path[512];
-    char mailer_config_path[512];
+    char mailer_config[512];
     int min_priority;  // 0-7, where 0=emerg, 3=err, 4=warning
     int batch_window;  // seconds to batch errors before sending
     char filters[1024]; // comma-separated service filters
@@ -282,62 +282,41 @@ char* create_html_email(const char* hostname, const char* service, const char* m
 }
 
 int send_email(const char* subject, const char* html_body) {
-    // Create temporary file for HTML body
-    char temp_file[] = "/tmp/journalmon_XXXXXX";
-    int fd = mkstemp(temp_file);
-    if (fd == -1) {
-        fprintf(stderr, ERROR("Failed to create temp file: %s"), strerror(errno));
+    GoInterface err;
+    GoString configPath = {config.mailer_config, strlen(config.mailer_config)};
+    struct LoadConfigFromPath_return loadedCnf = LoadConfigFromPath(configPath);
+
+    err = loadedCnf.r1;
+    MailerConfig *cnf = loadedCnf.r0;
+
+    if (err.t != NULL) {
+        GoString goErr = *(GoString*)err.v; // pointer to Go string
+        fprintf(stderr, "Mailer error: %.*s\n", (int)goErr.n, goErr.p);
         return -1;
     }
 
-    int bytes = write(fd, html_body, strlen(html_body));
-    if (bytes == 0) fprintf(stderr, WARN("Wrote 0 bytes to temporary mail body; file may be incomplete"));
-    if (bytes < 0) {
-        fprintf(stderr, ERROR("Failed to write HTML body to temporary file: %s"), strerror(errno));
-        return -1;
-    }
-
-    close(fd);
-
-    // Build mailer command
-    char cmd[MAX_CMD];
-    snprintf(cmd, sizeof(cmd),
-        "%s --c \"%s\" --to \"%s\" --subject \"%s\" --body \"$(cat %s)\" 2>&1",
-        config.mailer_path,
-        config.mailer_config_path,
-        config.recipient,
-        subject,
-        temp_file
+    err = SendMail(
+        (GoString){cnf->Host, strlen(cnf->Host)},
+        cnf->Port,
+        (GoString){cnf->Username, strlen(cnf->Username)},
+        (GoString){cnf->Password, strlen(cnf->Password)},
+        (GoString){cnf->From, strlen(cnf->From)},
+        (GoString){config.recipient, strlen(config.recipient)},
+        (GoString){subject, strlen(subject)},
+        (GoString){html_body, strlen(html_body)},
+        (GoSlice){},
+        (GoSlice){},
+        (GoSlice){}
     );
 
-
-    // Execute mailer
-    FILE* pipe = popen(cmd, "r");
-    if (!pipe) {
-        fprintf(stderr, ERROR("Failed to execute mailer: %s"), strerror(errno));
-        unlink(temp_file);
+    if (err.t != NULL) {
+        GoString goErr = *(GoString*)err.v; // pointer to Go string
+        fprintf(stderr, "Mailer error: %.*s\n", (int)goErr.n, goErr.p);
         return -1;
     }
 
-    char output[1024];
-    while (fgets(output, sizeof(output), pipe) != NULL) {
-        // Only print the output if it contains more than just the null terminator
-        if (strlen(output) > 1) {
-            printf("  📧 %s", output);
-        }
-    }
-
-    int status = pclose(pipe);
-    unlink(temp_file);
-
-    if (WIFEXITED(status) && WEXITSTATUS(status) == 0) {
-        // `mailer` already logs successful message
-        // printf(OK("Email sent successfully"));
-        return 0;
-    } else {
-        fprintf(stderr, ERROR("Mailer failed with status %d"), WEXITSTATUS(status));
-        return -1;
-    }
+    printf(OK("Email sent successfully"));
+    return 0;
 }
 
 static inline void safe_copy(char *dst, size_t dst_size, const char *src) {
@@ -371,10 +350,8 @@ int load_config(const char* config_path) {
 
             if (strcmp(k, "recipient") == 0) {
                 safe_copy(config.recipient, sizeof(config.recipient), v);
-            } else if (strcmp(k, "mailer_path") == 0) {
-                safe_copy(config.mailer_path, sizeof(config.mailer_path), v);
-            } else if (strcmp(k, "mailer_config_path") == 0) {
-                safe_copy(config.mailer_config_path, sizeof(config.mailer_config_path), v);
+            } else if (strcmp(k, "mailer_config") == 0) {
+                safe_copy(config.mailer_config, sizeof(config.mailer_config), v);
             } else if (strcmp(k, "min_priority") == 0) {
                 config.min_priority = atoi(v);
             } else if (strcmp(k, "batch_window") == 0) {
@@ -414,8 +391,7 @@ void show_help() {
     printf("    2. /etc/journalmon/config\n\n");
     printf("  Config file format:\n");
     printf("    recipient=admin@example.com\n");
-    printf("    mailer_path=/usr/local/bin/mailer\n");
-    printf("    mailer_config_path=/home/user/.config/mailer/config.json\n");
+    printf("    mailer_config=/home/user/.config/mailer/config.json\n");
     printf("    min_priority=3          # 0=emerg, 3=error, 4=warning, 7=debug\n");
     printf("    batch_window=60         # seconds to batch errors\n");
     printf("    filters=nginx,postgres  # optional: specific services to monitor\n\n");
@@ -454,8 +430,7 @@ int main(int argc, char* argv[]) {
     // Load configuration
     config.min_priority = 4;  // Default: WARNING and above
     config.batch_window = 60;
-    strcpy(config.mailer_path, "mailer");
-    strcpy(config.mailer_config_path, "/home/user/.config/mailer/config.json");
+    strcpy(config.mailer_config, "/home/user/.config/mailer/config.json");
 
     int config_loaded = 0;
     if (config_path) {
@@ -485,7 +460,6 @@ int main(int argc, char* argv[]) {
     print_banner();
     printf(OK("Configuration loaded"));
     printf(INFO("   Recipient: %s"), config.recipient);
-    printf(INFO("   Mailer: %s"), config.mailer_path);
     printf(INFO("   Min Priority: %s (≤%d)"), get_priority_badge(config.min_priority), config.min_priority);
     if (strlen(config.filters) > 0) {
         printf(INFO("   Filters: %s"), config.filters);
