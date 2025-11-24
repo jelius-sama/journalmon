@@ -284,19 +284,18 @@ static inline char* create_html_email(const char* hostname, const char* service,
 static inline int send_email(char* subject, char* html_body) {
     MailerConfig* cnf = NULL;
     char* err = NULL;
+    int status;
 
     // Load configuration
-    struct LoadConfigFromPath_return ret = LoadConfigFromPath(config.mailer_config);
-    cnf = ret.r0; err = ret.r1;
-
-    if (err != NULL) {
+    status = LoadConfigFromPath(config.mailer_config, &cnf, &err);
+    if (status != 0) {
         fprintf(stderr, "Mailer error loading config: %s\n", err);
         FreeCString(err);
         return -1;
     }
 
     // Send the email
-    err = SendMail(
+    status = SendMail(
         cnf->Host,
         cnf->Port,
         cnf->Username,
@@ -307,14 +306,15 @@ static inline int send_email(char* subject, char* html_body) {
         html_body,
         NULL, // cc
         NULL, // bcc
-        NULL  // attachments
+        NULL, // attachments
+        &err
     );
 
     // Free the configuration after sending
     FreeMailerConfig(cnf);
 
-    if (err != NULL) {
-        fprintf(stderr, ERROR("Mailer error sending email: %s"), err);
+    if (status != 0) {
+        fprintf(stderr, ERROR("Mailer error sending email: %s\n"), err);
         FreeCString(err);
         return -1;
     }
@@ -322,7 +322,6 @@ static inline int send_email(char* subject, char* html_body) {
     printf(OK("Email sent successfully\n"));
     return 0;
 }
-
 static inline void safe_copy(char *dst, size_t dst_size, const char *src) {
     size_t len = strlen(src);
     if (len >= dst_size)
