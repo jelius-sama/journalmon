@@ -1,10 +1,12 @@
-all: libmailer.a journalmon
+all: libmailer/libmailer.a bin/journalmon
 
-libmailer.a:
+CC := gcc
+CFLAGS := -Wall -Wextra -static -O3
+CSLIBS := -L./libmailer -lmailer
+
+libmailer/libmailer.a:
 	@cd libmailer && make
 
-journalmon: libmailer.a
+bin/journalmon: libmailer/libmailer.a
 	@mkdir -p ./bin
-	gcc -Wall -Wextra -static -O3 \
-		-o ./bin/journalmon ./journalmon.c ./libmailer/libmailer.a \
-		-pthread -ldl
+	$(CC) $(CFLAGS) -o ./bin/journalmon ./journalmon.c $(CSLIBS)

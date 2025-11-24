@@ -322,6 +322,7 @@ static inline int send_email(char* subject, char* html_body) {
     printf(OK("Email sent successfully\n"));
     return 0;
 }
+
 static inline void safe_copy(char *dst, size_t dst_size, const char *src) {
     size_t len = strlen(src);
     if (len >= dst_size)
@@ -433,7 +434,7 @@ int main(int argc, char* argv[]) {
     // Load configuration
     config.min_priority = 4;  // Default: WARNING and above
     config.batch_window = 60;
-    strcpy(config.mailer_config, "/home/user/.config/mailer/config.json");
+    strcpy(config.mailer_config, "/home/jelius-sama/.config/mailer/config.json");
 
     int config_loaded = 0;
     if (config_path) {
