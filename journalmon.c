@@ -434,7 +434,7 @@ int main(int argc, char* argv[]) {
     // Load configuration
     config.min_priority = 4;  // Default: WARNING and above
     config.batch_window = 60;
-    strcpy(config.mailer_config, "/home/jelius-sama/.config/mailer/config.json");
+    strcpy(config.mailer_config, "/home/user/.config/mailer/config.json");
 
     int config_loaded = 0;
     if (config_path) {
