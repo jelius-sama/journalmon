@@ -78,12 +78,12 @@ typedef struct {
 static volatile int running = 1;
 static Config config;
 
-void signal_handler(int sig) {
+static inline void signal_handler(int sig) {
     running = 0;
     printf(ERROR("\n", "Caught signal %d, shutting down gracefully..."), sig);
 }
 
-char* html_escape(const char* str) {
+static inline char* html_escape(const char* str) {
     if (!str) return strdup("");
 
     size_t len = strlen(str);
@@ -122,7 +122,7 @@ char* html_escape(const char* str) {
     return escaped;
 }
 
-char* get_priority_badge(int priority) {
+static inline char* get_priority_badge(int priority) {
     switch (priority) {
         case 0: return "EMERGENCY";
         case 1: return "ALERT";
@@ -136,7 +136,7 @@ char* get_priority_badge(int priority) {
     }
 }
 
-char* get_priority_color(int priority) {
+static inline char* get_priority_color(int priority) {
     switch (priority) {
         case 0:
         case 1:
@@ -150,7 +150,7 @@ char* get_priority_color(int priority) {
     }
 }
 
-char* create_html_email(const char* hostname, const char* service, const char* message, 
+static inline char* create_html_email(const char* hostname, const char* service, const char* message, 
                         const char* timestamp, int priority, const char* unit) {
     char* html = malloc(MAX_CMD);
     if (!html) return NULL;
@@ -281,41 +281,45 @@ char* create_html_email(const char* hostname, const char* service, const char* m
     return html;
 }
 
-int send_email(const char* subject, const char* html_body) {
-    GoInterface err;
-    GoString configPath = {config.mailer_config, strlen(config.mailer_config)};
-    struct LoadConfigFromPath_return loadedCnf = LoadConfigFromPath(configPath);
+static inline int send_email(char* subject, char* html_body) {
+    MailerConfig* cnf = NULL;
+    char* err = NULL;
 
-    err = loadedCnf.r1;
-    MailerConfig *cnf = loadedCnf.r0;
+    // Load configuration
+    struct LoadConfigFromPath_return ret = LoadConfigFromPath(config.mailer_config);
+    cnf = ret.r0; err = ret.r1;
 
-    if (err.t != NULL) {
-        GoString goErr = *(GoString*)err.v; // pointer to Go string
-        fprintf(stderr, "Mailer error: %.*s\n", (int)goErr.n, goErr.p);
+    if (err != NULL) {
+        fprintf(stderr, "Mailer error loading config: %s\n", err);
+        FreeCString(err);
         return -1;
     }
 
+    // Send the email
     err = SendMail(
-        (GoString){cnf->Host, strlen(cnf->Host)},
+        cnf->Host,
         cnf->Port,
-        (GoString){cnf->Username, strlen(cnf->Username)},
-        (GoString){cnf->Password, strlen(cnf->Password)},
-        (GoString){cnf->From, strlen(cnf->From)},
-        (GoString){config.recipient, strlen(config.recipient)},
-        (GoString){subject, strlen(subject)},
-        (GoString){html_body, strlen(html_body)},
-        (GoSlice){},
-        (GoSlice){},
-        (GoSlice){}
+        cnf->Username,
+        cnf->Password,
+        cnf->From,
+        config.recipient,
+        subject,
+        html_body,
+        NULL, // cc
+        NULL, // bcc
+        NULL  // attachments
     );
 
-    if (err.t != NULL) {
-        GoString goErr = *(GoString*)err.v; // pointer to Go string
-        fprintf(stderr, "Mailer error: %.*s\n", (int)goErr.n, goErr.p);
+    // Free the configuration after sending
+    FreeMailerConfig(cnf);
+
+    if (err != NULL) {
+        fprintf(stderr, ERROR("Mailer error sending email: %s"), err);
+        FreeCString(err);
         return -1;
     }
 
-    printf(OK("Email sent successfully"));
+    printf(OK("Email sent successfully\n"));
     return 0;
 }
 
@@ -328,7 +332,7 @@ static inline void safe_copy(char *dst, size_t dst_size, const char *src) {
     dst[len] = '\0';
 }
 
-int load_config(const char* config_path) {
+static inline int load_config(const char* config_path) {
     FILE* f = fopen(config_path, "r");
     if (!f) return -1;
 
@@ -366,7 +370,7 @@ int load_config(const char* config_path) {
     return 0;
 }
 
-void print_banner() {
+static inline void print_banner() {
     printf("\n");
     printf("    ╔═══════════════════════════════════════════════════════╗\n");
     printf("    ║                                                       ║\n");
@@ -377,7 +381,7 @@ void print_banner() {
     printf("\n");
 }
 
-void show_help() {
+static inline void show_help() {
     print_banner();
     printf("📚 USAGE:\n");
     printf("  journalmon [OPTIONS]\n\n");
