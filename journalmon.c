@@ -434,7 +434,18 @@ int main(int argc, char* argv[]) {
     // Load configuration
     config.min_priority = 4;  // Default: WARNING and above
     config.batch_window = 60;
-    strcpy(config.mailer_config, "/home/user/.config/mailer/config.json");
+
+    char *home = getenv("HOME");
+    if (home != NULL) {
+        snprintf(config.mailer_config,
+                 sizeof(config.mailer_config),
+                 "%s/.config/mailer/config.json",
+                 home);
+    } else {
+        snprintf(config.mailer_config,
+                 sizeof(config.mailer_config),
+                 "/home/user/.config/mailer/config.json");
+    }
 
     int config_loaded = 0;
     if (config_path) {
@@ -456,7 +467,7 @@ int main(int argc, char* argv[]) {
 
     if (!config_loaded || strlen(config.recipient) == 0) {
         fprintf(stderr, ERROR("Error: No valid configuration found."));
-        fprintf(stderr, ERROR("Please create a config file at ~/.config/journalmon/config"));
+        fprintf(stderr, ERROR("Please create a config file at %s"), config.mailer_config);
         fprintf(stderr, ERROR("Run 'journalmon --help' for more information."));
         return 1;
     }
